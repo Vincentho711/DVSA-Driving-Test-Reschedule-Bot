@@ -1,7 +1,3 @@
-# Cop a Driving Test by Electrokid Technology
-# Distributed under Apache License 2.0
-# Developed by Tom Pavier
-
 # You will need chrome installed and the correct chromedriver for it for this to work (read GitHub page for more)
 # To improve reliability, please install buster (read GitHub page for more)
 
@@ -12,60 +8,118 @@ import time
 from datetime import datetime, timedelta
 from datetime import time as time1
 from selenium import webdriver
+from selenium.webdriver.common.by import By
+from configparser import ConfigParser
 import requests
+import ast
 import json
 import os
 import traceback
 import random
+import text as text
 
-##########################################
-# Please update to match your prefrences #
-##########################################
+#########################################
+#  Please update details in config.ini  #
+#########################################
 
 current_path = str(os.path.dirname(os.path.realpath(__file__))) # Gets current file location
+# Grab config data
+config = ConfigParser()
+config.read(os.path.join(current_path,'config.ini'))
 
-# This must be in JSON format (as it is a list you can technically search for multiple sets of bookings -> just duplicate the bit in the curly brackets below)
-# Disabled dates will be dates which don't get reserved
-# Center is a list and you can loop through checking at different places
-# Before date is the latest date you can take a test
-# After date is the earliest date you can take a test
-prefrences = """[
-    {
-        "licence-id": 0,
-        "user-id": 0,
-        "licence": "YOUR-LICENCE-NUMBER",
-        "booking": "YOUR-BOOKING-REFRENCE",
-        "current-test": {
-            "date": "Monday 18 September 2021 11:10am",
-            "center": "Nottingham",
-            "error": false
-        },
-        "disabled-dates": [
-            "2021-09-20",
-            "2021-09-21",
-            "2021-09-22"
-        ],
-        "center": [
-            "Nottingham",
-            "Dundee"
-        ],
-        "before-date": "2021-09-20",
-        "after-date": "2021-08-23"
-    }
-]"""
+# prefrences json is deprecated, replaced by config.ini
+# prefrences = """[
+#     {
+#         "licence-id": 0,
+#         "user-id": 0,
+#         "licence": "",
+#         "booking": "",
+#         "current-test": {
+#             "date": "",
+#             "center": "",
+#             "error": 
+#         },
+#         "disabled-dates": [
+#             ""
+#         ],
+#         "center": [
+#             ""
+#         ],
+#         "before-date": "",
+#         "after-date": ""
+#     }
+# ]"""
 
-busterEnabled = False
+# Use to parse data in config.ini
+def parse_config() -> dict:
+    def build_dict(**kwargs) -> dict:
+        perference = {}
+        perference["licence-id"] = 0
+        perference["user-id"] = 0
+        perference["licence"] = kwargs.get('licence')
+        perference["booking"] = kwargs.get('booking')
+        perference["current-test"] = {}
+        perference["current-test"]["date"] = kwargs.get('current_test_date')
+        perference["current-test"]["center"] = kwargs.get('current_test_centre')
+        perference["current-test"]["error"] = kwargs.get('current_test_error')
+        perference["disabled-dates"] = ast.literal_eval(kwargs.get('disabled_dates'))
+        perference["center"] = ast.literal_eval(kwargs.get('centre'))
+        perference["before-date"] = kwargs.get('before_date')
+        perference["after-date"] = kwargs.get('after_date')
+
+        return perference
+
+    key_dict = {}
+    for section in config.sections():
+        for key, val in config.items(section):
+            key_val = config.get(section,key)
+            key_dict[key] = key_val
+    
+    perference_dict = build_dict(**key_dict)
+    return perference_dict
+
+# Grab phone number from config for notification
+phone_number = config.get("twilio","phone_number")
+# Grab chromedriver version, windows or linux
+chromedriver_version = config.get("chromedriver","driver_verion")
+# Change the version of chromedriver for your OS by building path
+chromedriverPath = os.path.join(str(current_path), chromedriver_version)
+# Grab auto_book_test
+auto_book_test = config.get("preferences","auto_book_test")
+# Grab formatted test date
+formatted_current_test_date = config.get("preferences","formatted_current_test_date")
+
+# Enable buster to solve captcha
+busterEnabled = True
 busterPath = str(current_path) + "/buster-chrome.zip"
-chromedriverPath = str(current_path) + "/chromedriver.exe"
+
+
+def test_avaliable(last_date, last_time):
+    try:
+        message = f"Tests are avaliable on {last_date} at {last_time}."
+        text.send_text(phone_number,message)
+    except Exception as e:
+        print(f"Could not send SMS when tests are avaliable due to: {e}")
 
 def test_found(centre, date, time, shortNotice):
-    # Handle test found
-    # You may want to send yourself an email here or something
-    print("Please configure the test_found function to enable notifications")
+    try:
+        message = f"Test has been found in {centre}! Date: {date}, Time: {time}, Short Notice: {shortNotice}."
+        text.send_text(phone_number,message)
+    except Exception as e:
+        print(f"Could not send SMS when test is found due to: {e}.")
 
 ######################################################
 # You do not need to change anything below this line #
 ######################################################
+
+print("")
+print(f"Time: {datetime.now()}")
+print("="*100)
+print("START OF SCRIPT")
+print("="*100)
+print("Input: ")
+print([parse_config()])
+print("="*100)
 
 # Due to firewall issues this has to be fairly long and up to 10 seconds will be added randomly to reduce the risk of getting blocked
 DVSADelay = 60
@@ -96,8 +150,11 @@ def input_text_box(box_id, text, currentDriver):
 
 def random_sleep(weight, maxTime):
     maxTime = maxTime * 100
+    print(f"Sleeping for {weight} seconds...")
     time.sleep(weight)
-    time.sleep(random.randint(0, maxTime) / 100)
+    ran_sleep_time = random.randint(0, maxTime) / 100
+    print(f"Sleeping for another {ran_sleep_time} seconds...")
+    time.sleep(ran_sleep_time)
 
 def wait_for_internet_connection():
     connected = False
@@ -119,7 +176,7 @@ def report_error(error_code, title=None, data=None):
     except Exception as e:
         print("Unable to log error to server: " + str(e))
 
-def scan_for_preferred_tests(before_date, after_date, unavailable_dates, test_date, currentDriver):
+def scan_for_preferred_tests(before_date, after_date, unavailable_dates, test_date, formatted_test_date, currentDriver):
     last_date = None
     last_date_element = None
     if before_date != None:
@@ -149,48 +206,66 @@ def scan_for_preferred_tests(before_date, after_date, unavailable_dates, test_da
     for day in available_days:
         if not "--unavailable" in day.get_attribute("class"):
             day_a = day.find_element_by_xpath(".//a")
-            if day_a.get_attribute("data-date") not in unavailable_dates and datetime.strptime(day_a.get_attribute("data-date"), "%Y-%m-%d") < minDate and datetime.strptime(day_a.get_attribute("data-date"), "%Y-%m-%d") > maxDate and datetime.strptime(day_a.get_attribute("data-date"), "%Y-%m-%d").weekday() < 5:
-                last_date_container = day
-                last_date_element = day_a
-                last_date = day_a.get_attribute("data-date")
-                found = True
-                break
+            if day_a.get_attribute("data-date") not in unavailable_dates and datetime.strptime(day_a.get_attribute("data-date"), "%Y-%m-%d") < minDate and \
+                datetime.strptime(day_a.get_attribute("data-date"), "%Y-%m-%d") > maxDate and datetime.strptime(day_a.get_attribute("data-date"), "%Y-%m-%d").weekday() < 5 and \
+                    day_a.get_attribute("data-date") != formatted_test_date:
+                        last_date_container = day
+                        last_date_element = day_a
+                        last_date = day_a.get_attribute("data-date")
+                        found = True
+                        break
     return found, last_date, last_date_element
 
-def solve_captcha(currentDriver):
-    driver = currentDriver
-    driver.switch_to.default_content()
-    iframe = driver.find_element_by_id("main-iframe")
-    driver.switch_to.frame(iframe)
-    iframe1 = driver.find_element_by_css_selector("iframe[name*='a-'][src*='https://www.google.com/recaptcha/api2/anchor?']")
-    driver.switch_to.frame(iframe1)
-    time.sleep(0.2)
-    driver.find_element_by_xpath("//span[@id='recaptcha-anchor']").click()
-    driver.switch_to.default_content()
-    time.sleep(0.2)
-    iframe = driver.find_element_by_id("main-iframe")
-    driver.switch_to.frame(iframe)
-    if "Why am I seeing this page" in driver.page_source:
-        print("Completing captcha 1")
-        time.sleep(0.2)
-        iframe1 = driver.find_element_by_css_selector("iframe[title*='recaptcha challenge'][src*='https://www.google.com/recaptcha/api2/bframe?']")
+def solve_captcha(currentDriver,skip=False) -> bool:
+    if not skip:
+        driver = currentDriver
+        driver.switch_to.default_content()
+        iframe = driver.find_element_by_id("main-iframe")
+        driver.switch_to.frame(iframe)
+        iframe1 = driver.find_element_by_css_selector("iframe[name*='a-'][src*='https://www.google.com/recaptcha/api2/anchor?']")
         driver.switch_to.frame(iframe1)
-        print("Completing captcha 2")
         time.sleep(0.2)
-        driver.find_elements_by_class_name("help-button-holder")[0].click()
-        random_sleep(5, 4)
-        attempts2 = 0
-        while ("Multiple correct solutions required" in driver.page_source and attempts2 < 4):
-            attempts2 += 1
+        driver.find_element_by_xpath("//span[@id='recaptcha-anchor']").click()
+        driver.switch_to.default_content()
+        time.sleep(0.2)
+        iframe = driver.find_element_by_id("main-iframe")
+        driver.switch_to.frame(iframe)
+        if "Why am I seeing this page" in driver.page_source:
+            print("Completing captcha 1")
+            time.sleep(2)
+            iframe1 = driver.find_element_by_css_selector("iframe[title*='recaptcha challenge'][src*='https://www.google.com/recaptcha/api2/bframe?']")
+            driver.switch_to.frame(iframe1)
+            print("Completing captcha 2")
+            time.sleep(2)
             driver.find_elements_by_class_name("help-button-holder")[0].click()
             random_sleep(5, 4)
-        driver.switch_to.default_content()
-        print("Completing captcha 3")
-        time.sleep(0.5)
-    if "Why am I seeing this page" in driver.page_source:
-        return False
+            attempts2 = 0
+            while ("Multiple correct solutions required" in driver.page_source and attempts2 < 4):
+                attempts2 += 1
+                driver.find_elements_by_class_name("help-button-holder")[0].click()
+                random_sleep(5, 4)
+            driver.switch_to.default_content()
+            print("Completing captcha 3")
+            time.sleep(1)
+        if "Why am I seeing this page" in driver.page_source:
+            return False
+        else:
+            return True
     else:
-        return True
+        print(f"Solve_captcha() skipped. Solve manually...")
+        time.sleep(15)
+
+def enter_credentials(manual=False):
+    if not manual:
+        input_text_box("driving-licence-number", str(licenceInfo["licence"]), driver)
+        input_text_box("application-reference-number", str(licenceInfo["booking"]), driver)
+        random_sleep(1, 1)
+        driver.find_element_by_id("booking-login").click()
+        random_sleep(3, 1)
+    else:
+        print(f"Enter credentials manually...")
+        time.sleep(30)
+
 
 def send_update_log(licenceIdUpdate):
     # For future use
@@ -220,16 +295,24 @@ chrome_options.add_experimental_option("prefs", prefs)
 if busterEnabled:
     chrome_options.add_extension(busterPath) # Use reCAPTCHA buster extension
 
+# Try 4 times when script is run
+max_attempt = 4
 #### Main Loop ####
-while runningLoop:
+# while runningLoop:
+for i in range(max_attempt):
+    print()
+    print("-"*100)
+    print(f"Main attempt:{i}")
+    print()
     try:
         loopStartTime = time.time()
         if (is_time_between(time1(6,5), time1(23,35))):
             allDriversQuit = False
             # Get list of new licences to check
-            dataRAW = prefrences
-            data = json.loads(dataRAW)
-
+            # dataRAW = prefrences
+            # data = json.loads(dataRAW)
+            dataRAW = json.dumps([parse_config()])
+            data = [parse_config()]
             # Check for any changes in the array
             if dataRAW != previousLicences:
                 # Compare and update lists
@@ -315,27 +398,51 @@ while runningLoop:
                             queueComplete = True
 
                         if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
-                            random_sleep(5, 10)
+                            random_sleep(4, 10)
                             driver.refresh()
                             if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
                                 random_sleep(2,5)
-                                solve_captcha(driver)
+                                captcha_success = solve_captcha(driver)
+                                if not captcha_success:
+                                    print(f"First captcha attempty unsuccessful.")
+                                else:
+                                    print(f"Captcha solved!")
+
                                 time.sleep(4)
                                 if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
                                     queueComplete = False
                                     print("Firewall - Extra delay")
-                                    random_sleep(100, 10)
+                                    random_sleep(180, 10)
                                 else:
                                     print("Firewall has been delt with ;)")
                             else:
                                 print("Firewall has been delt with ;)")
 
                         if (queueComplete):
-                            input_text_box("driving-licence-number", str(licenceInfo["licence"]), driver)
-                            input_text_box("application-reference-number", str(licenceInfo["booking"]), driver)
-                            random_sleep(1, 1)
-                            driver.find_element_by_id("booking-login").click()
-                            random_sleep(3, 1)
+                            enter_credentials(manual=False)
+
+                            if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
+                                random_sleep(5, 10)
+                                driver.refresh()
+                                if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
+                                    random_sleep(2,5)
+                                    captcha_success = solve_captcha(driver)
+                                    
+                                    if not captcha_success:
+                                        print(f"First captcha attempty unsuccessful.")
+                                    else:
+                                        print("Captcha solved!")
+                                    
+                                    time.sleep(3)
+
+                                    if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
+                                        queueComplete = False
+                                        print("Firewall - Extra delay")
+                                        random_sleep(20, 10)
+                                    else:
+                                        print("Firewall has been delt with ;)")
+                                else:
+                                    print("Firewall has been delt with ;)")
 
                             if ("loginError=true" in driver.current_url):
                                 print("Incorrect Licence/Booking Ref")
@@ -343,6 +450,7 @@ while runningLoop:
                                 random_sleep(3, 1)
                                 
                                 contents_container = driver.find_elements_by_class_name("contents")
+                                # contents_container = driver.find_element_by_css_selector("div.contents")
                                 test_date_temp = contents_container[0].find_element_by_xpath(".//dd").get_attribute('innerHTML')
                                 test_center_temp = contents_container[1].find_element_by_xpath(".//dd").get_attribute('innerHTML')
                                 print("Test Date: " + test_date_temp)
@@ -417,7 +525,14 @@ while runningLoop:
                                 else:
                                     licenceInfo["active"] = True
                                     print("Tests available, checking dates...")
-                                    found, last_date, last_date_element = scan_for_preferred_tests(licenceInfo["before-date"], licenceInfo["after-date"], licenceInfo["disabled-dates"], licenceInfo["current-test"]["date"], driver)
+
+                                    # # Notify my phone, disabled as avaliable dates after current test will still notify in this case
+                                    # try:
+                                    #     text.send_text(phone_number,"Tests avaliable, checking dates now...")
+                                    # except Exception as e:
+                                    #     print(f"Could not notify after tests avaliable due to: {e}")
+
+                                    found, last_date, last_date_element = scan_for_preferred_tests(licenceInfo["before-date"], licenceInfo["after-date"], licenceInfo["disabled-dates"], licenceInfo["current-test"]["date"], formatted_current_test_date, driver)
                                     if found:
                                         month = datetime.strptime(last_date, "%Y-%m-%d")
                                         attempts = 0
@@ -437,6 +552,9 @@ while runningLoop:
                                         time_container = driver.find_element_by_id("date-" + last_date)
                                         time_item = int(time_container.find_element_by_xpath(".//label").get_attribute('for').replace("slot-", "")) / 1000
                                         test_time = datetime.fromtimestamp(time_item).strftime("%H:%M")
+
+                                        # Notify my phone
+                                        test_avaliable(last_date,test_time)
 
                                         try:
                                             shortNoticeCheck = time_container.find_element_by_id(time_container.find_element_by_xpath(".//label").get_attribute('for')).get_attribute('data-short-notice')
@@ -556,6 +674,7 @@ while runningLoop:
                                                 "short": shortNotice
                                             })
 
+                                            # Notify my phone
                                             test_found(licenceInfo["center"][0], last_date, test_time, shortNotice)
 
                                             # Put test notification here
@@ -563,23 +682,31 @@ while runningLoop:
                                             print("Date: " + last_date)
                                             print("Time: " + test_time)
 
-                                            validInput = False
-                                            while not validInput:
-                                                userInput = input("Would you like to book this test? y/n")
-                                                if userInput == "y":
-                                                    print("Bookig test")
-                                                    test_accept = True
-                                                    validInput = True
-                                                elif userInput == "n":
-                                                    print("Not booking test")
-                                                    test_accept = False
-                                                    validInput = True
-                                                else:
-                                                    print("Please either enter y or n")
-                                            
-                                            if test_accept:
+                                            # Manual input is disabled here
+                                            # validInput = False
+                                            # while not validInput:
+                                            #     userInput = input("Would you like to book this test? y/n")
+                                            #     if userInput == "y":
+                                            #         print("Bookig test")
+                                            #         test_accept = True
+                                            #         validInput = True
+                                            #     elif userInput == "n":
+                                            #         print("Not booking test")
+                                            #         test_accept = False
+                                            #         validInput = True
+                                            #     else:
+                                            #         print("Please either enter y or n")
+                                
+                                            if auto_book_test == "True":
                                                 print("Booking Test...")
-                                                    
+                                                
+                                                # Notify my phone
+                                                try:
+                                                    message = "Test accepted. Trying to book test now..."
+                                                    text.send_text(phone_number,message)
+                                                except Exception as e:
+                                                    print(f"Could not send SMS after test accept due to: {e}")
+
                                                 driver.find_element_by_id("confirm-changes").click()
                                                 if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
                                                     print("Firewall - booking error")
@@ -617,7 +744,7 @@ while runningLoop:
                                     else:
                                         print("No test found")
                                 
-                            random_sleep(25, 5)
+                            random_sleep(20, 30)
                         else:
                             err = True
                             print("Queue max time exceeded")
@@ -729,7 +856,14 @@ while runningLoop:
                             licenceInfo["active"] = False
                         else:
                             print("Tests available, checking dates...")
-                            found, last_date, last_date_element = scan_for_preferred_tests(licenceInfo["before-date"], licenceInfo["after-date"], licenceInfo["disabled-dates"], licenceInfo["current-test"]["date"], driver)
+
+                            # # Notify my phone, disabled as avaliable test after current test will still count
+                            # try:
+                            #     text.send_text(phone_number,"Tests avaliable, checking dates now...")
+                            # except Exception as e:
+                            #     print(f"Could not notify after tests avaliable due to: {e}")
+
+                            found, last_date, last_date_element = scan_for_preferred_tests(licenceInfo["before-date"], licenceInfo["after-date"], licenceInfo["disabled-dates"], licenceInfo["current-test"]["date"], formatted_current_test_date, driver)
                             if found:
                                 month = datetime.strptime(last_date, "%Y-%m-%d")
                                 attempts = 0
@@ -867,6 +1001,7 @@ while runningLoop:
                                         "short": shortNotice
                                     })
 
+                                    # Notify my phone
                                     test_found(licenceInfo["center"][0], last_date, test_time, shortNotice)
                                     
                                     # Put test notification here
@@ -874,23 +1009,31 @@ while runningLoop:
                                     print("Date: " + last_date)
                                     print("Time: " + test_time)
 
-                                    validInput = False
-                                    while not validInput:
-                                        userInput = input("Would you like to book this test? y/n")
-                                        if userInput == "y":
-                                            print("Bookig test")
-                                            test_accept = True
-                                            validInput = True
-                                        elif userInput == "n":
-                                            print("Not booking test")
-                                            test_accept = False
-                                            validInput = True
-                                        else:
-                                            print("Please either enter y or n")
-
-                                    if test_accept:
+                                    # Manual input is disabled here 
+                                    # validInput = False
+                                    # while not validInput:
+                                    #     userInput = input("Would you like to book this test? y/n")
+                                    #     if userInput == "y":
+                                    #         print("Bookig test")
+                                    #         test_accept = True
+                                    #         validInput = True
+                                    #     elif userInput == "n":
+                                    #         print("Not booking test")
+                                    #         test_accept = False
+                                    #         validInput = True
+                                    #     else:
+                                    #         print("Please either enter y or n")
+                                    
+                                    if auto_book_test == "True":
                                         print("Booking Test...")
-                                            
+
+                                        # Notify my phone
+                                        try:
+                                            message = "Test accepted. Trying to book test now..."
+                                            text.send_text(phone_number,message)
+                                        except Exception as e:
+                                            print(f"Could not send SMS after test accept due to: {e}")
+
                                         driver.find_element_by_id("confirm-changes").click()
                                         if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
                                             print("Firewall - booking error")
@@ -969,7 +1112,7 @@ while runningLoop:
         try:
             if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
                 print("Firewall - Extra delay")
-                random_sleep(100, 10)
+                random_sleep(50, 10)
         except:
             print("Failed firewall check")
         
@@ -985,4 +1128,16 @@ while runningLoop:
         except:
             print("Unable to deactivate licence info")
     random_sleep(10, 5)
-        
+
+    # Check if it is end of script, quit drivers
+    if i == (max_attempt-1):
+        for driver in activeDrivers:
+            # Quit all current drivers
+            try:
+                activeDrivers[driver].quit()
+            except:
+                print("Failed to quit driver")
+
+print("="*100)
+print("END OF SCRIPT")
+print("="*100)
