@@ -1,5 +1,5 @@
 python=3.8.5
 selenium=4.0.0.b4
 twilio=6.62.1
-undetected-chromedriver=3.0.3=pypi_0
+undetected-chromedriver=3.0.3
 
