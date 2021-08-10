@@ -1,5 +1,4 @@
 python=3.8.5
-selenium=4.0.0.b4
+selenium
 twilio=6.62.1
-undetected-chromedriver=3.0.3
-
+undetected-chromedriver
