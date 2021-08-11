@@ -81,9 +81,12 @@ def parse_config() -> dict:
 # Grab phone number from config for notification
 phone_number = config.get("twilio","phone_number")
 # Grab chromedriver version, windows or linux
-chromedriver_version = config.get("chromedriver","driver_verion")
+# chromedriver_version = config.get("chromedriver","driver_verion")
 # Change the version of chromedriver for your OS by building path
-chromedriverPath = os.path.join(str(current_path), chromedriver_version)
+# chromedriverPath = os.path.join(str(current_path), chromedriver_version)
+# Use direct path for linux chromedriver
+chromedriverPath = "/bin/chromedriver"
+print(f"chrome driver path: {chromedriverPath}")
 # Grab auto_book_test
 auto_book_test = config.get("preferences","auto_book_test")
 # Grab formatted test date
@@ -253,7 +256,7 @@ def solve_captcha(currentDriver,skip=False) -> bool:
             return True
     else:
         print(f"Solve_captcha() skipped. Solve manually...")
-        time.sleep(15)
+        time.sleep(60)
 
 def enter_credentials(manual=False):
     if not manual:
@@ -286,12 +289,20 @@ previousLicences = "" # Raw data from server
 activeDrivers = {} # Dictionary of "licence-id"->driver
 allDriversQuit = True
 maxLoop = 100
+run_on_VM = False
+solve_manually = False
 
 # Chrome configuration
 chrome_options = uc.ChromeOptions()
-prefs = {"profile.managed_default_content_settings.images": 2} # Hide images (expreimental)
-chrome_options.add_experimental_option("prefs", prefs)
+if not solve_manually:
+    prefs = {"profile.managed_default_content_settings.images": 2} # Hide images (expreimental)
+    chrome_options.add_experimental_option("prefs", prefs)
 
+if run_on_VM is True:
+# Following code added for running on VM in case VM has no GPU which will cause error in webdriver
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36")
+    chrome_options.add_argument("window-size=1400,900")
 if busterEnabled:
     chrome_options.add_extension(busterPath) # Use reCAPTCHA buster extension
 
@@ -361,7 +372,7 @@ for i in range(max_attempt):
                                 transferred = True
                                 print("Transferred licence ID " + str(driver))
                         if not transferred:
-                            oldActiceDrivers[driver].quit()
+                            oldActiveDrivers[driver].quit()
                             print("Inactive chrome driver quit")
                 previousLicences = dataRAW
             else:
@@ -372,14 +383,17 @@ for i in range(max_attempt):
                 if licenceInfo["active"] == False:
                     licenceInfo["active"] = False
                     try:
-                        activeDrivers[licenceInfo["licence-id"]].quit()
+                        activeDrivers[licenceInfo["licence-id"]].close()
                     except:
                         print("No browser active to close")
                     print("Relaunching driver for licence " + str(licenceInfo["licence-id"]))
                         
-                    activeDrivers[licenceInfo["licence-id"]] = webdriver.Chrome(executable_path=chromedriverPath, chrome_options=chrome_options)
+                    activeDrivers[licenceInfo["licence-id"]] = webdriver.Chrome(executable_path=chromedriverPath, chrome_options=chrome_options, service_args=["--verbose","--log-path=logs/webdriver.log"])
                     driver = activeDrivers[licenceInfo["licence-id"]]
                     
+                    if run_on_VM:
+                        agent = driver.execute_script("return navigator.userAgent")
+
                     print("Launching queue")
                     driver.get(dvsa_queue_url)
                     try:
@@ -399,10 +413,15 @@ for i in range(max_attempt):
 
                         if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
                             random_sleep(4, 10)
-                            driver.refresh()
+                            
+                            if not solve_manually:
+                                driver.refresh()
+                            else:
+                                random_sleep(30, 10)
+
                             if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
                                 random_sleep(2,5)
-                                captcha_success = solve_captcha(driver)
+                                captcha_success = solve_captcha(driver,skip=solve_manually)
                                 if not captcha_success:
                                     print(f"First captcha attempty unsuccessful.")
                                 else:
@@ -423,10 +442,15 @@ for i in range(max_attempt):
 
                             if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
                                 random_sleep(5, 10)
-                                driver.refresh()
+                                
+                                if not solve_manually:
+                                    driver.refresh()
+                                else:
+                                    random_sleep(30, 10)
+
                                 if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
                                     random_sleep(2,5)
-                                    captcha_success = solve_captcha(driver)
+                                    captcha_success = solve_captcha(driver,skip=solve_manually)
                                     
                                     if not captcha_success:
                                         print(f"First captcha attempty unsuccessful.")
@@ -607,7 +631,7 @@ for i in range(max_attempt):
                                                         time.sleep(0.2)
                                                         try:
                                                             if "The time chosen is no longer available" not in driver.page_source:
-                                                                solve_captcha(driver)
+                                                                solve_captcha(driver,skip=solve_manually)
                                                             else:
                                                                 print("Time chosen is no longer available...")
                                                                 testTaken = True
@@ -622,7 +646,7 @@ for i in range(max_attempt):
                                                     time.sleep(0.2)
                                                     try:
                                                         if "The time chosen is no longer available" not in driver.page_source:
-                                                            solve_captcha(driver)
+                                                            solve_captcha(driver,skip=solve_manually)
                                                         else:
                                                             print("Time chosen is no longer available...")
                                                             testTaken = True
@@ -714,7 +738,7 @@ for i in range(max_attempt):
                                                     driver.refresh()
                                                     try:
                                                         if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
-                                                            solve_captcha(driver)
+                                                            solve_captcha(driver,skip=solve_manually)
                                                         else:
                                                             print("Recaptcha Bypassed")
                                                     except:
@@ -758,6 +782,7 @@ for i in range(max_attempt):
                         except:
                             print("No driver to close")
                         licenceInfo["active"] = False
+
 
                         try:
                             time.sleep(1)
@@ -881,7 +906,7 @@ for i in range(max_attempt):
                                 # time.sleep(0.6)
                                 last_date_element.click()
                                 time_container = driver.find_element_by_id("date-" + last_date)
-                                time_item = int(time_container.find_element_by_xpath(".//label").get_attribute('for').replace("slot-", "")) / 1000
+                                time_item = int(time_container.find_element-by_xpath(".//label").get_attribute('for').replace("slot-", "")) / 1000
                                 test_time = datetime.fromtimestamp(time_item).strftime("%H:%M")
 
                                 try:
@@ -935,7 +960,7 @@ for i in range(max_attempt):
                                                 time.sleep(0.2)
                                                 try:
                                                     if "The time chosen is no longer available" not in driver.page_source:
-                                                        solve_captcha(driver)
+                                                        solve_captcha(driver,skip=solve_manually)
                                                     else:
                                                         print("Time chosen is no longer available...")
                                                         testTaken = True
@@ -950,7 +975,7 @@ for i in range(max_attempt):
                                             time.sleep(0.2)
                                             try:
                                                 if "The time chosen is no longer available" not in driver.page_source:
-                                                    solve_captcha(driver)
+                                                    solve_captcha(driver,skip=solve_manually)
                                                 else:
                                                     print("Time chosen is no longer available...")
                                                     testTaken = True
@@ -1041,7 +1066,7 @@ for i in range(max_attempt):
                                             driver.refresh()
                                             try:
                                                 if ("Request unsuccessful. Incapsula incident ID" in driver.page_source):
-                                                    solve_captcha(driver)
+                                                    solve_captcha(driver,skip=solve_manually)
                                                 else:
                                                     print("Recaptcha Bypassed")
                                             except:
